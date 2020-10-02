@@ -41,7 +41,10 @@ module.exports = function(app) {
 
     // publish the batch to timestream
     let _publish_to_timstream = function(batch_of_points) {
-        let records = batch_of_points.map(function(point) {
+        // at this point we only care about the values in the batch_of_points,
+        // as the keys were just used to ensure we got the latest reported
+        // delta for each path
+        let records = Object.values(batch_of_points).map(function(point) {
             return {
                 MeasureName: point.name,
                 MeasureValue: `${point.value}`,
@@ -115,7 +118,6 @@ module.exports = function(app) {
 
         return function(delta, batch_of_points) {
             // filter out deltas not about us
-            // TODO: should I just use subscriptionmanager and subscribe?
             if (delta.context !== 'vessels.self' && delta.context === app.selfId) {
                 return;
             }
@@ -124,11 +126,18 @@ module.exports = function(app) {
                 return;
             }
 
-            delta.updates.forEach(function(update) {
+            // We do this at two layers, since we have to layers to iterate
+            // over, update and values.  batch_of_points contains a map with
+            // name -> { name, value, timestamp }.  We want to end up
+            // generating a new map and overwriting existing values with new
+            // values by name.  We do this by a reduce where we assign the
+            // single key.  The result is the new map.
+            return delta.updates.reduce(function(batch, update) {
                 if (!update.values) {
                     return;
                 }
 
+                let points = [];
                 // start with all update values
                 points = update.values;
                 // deal with the include/exclude list
@@ -142,31 +151,37 @@ module.exports = function(app) {
                     };
                 });
 
-                // TODO: perhaps I should do some key-wise merging to reduce the data
-                // points published?
-                batch_of_points.push(...points);
-            });
+                // repeat the reduce pattern, this is where we actually do the
+                // assignment
+                return points.reduce(function(map, point) {
+                    map[point.name] = point;
+                    return map;
+                }, batch);
+            }, batch_of_points);
         };
     };
 
     let _create_handle_delta = function(options) {
         // construct the filter function once and use the result
-        let add_to_batch = _add_delta_to_batch(options);
+        const add_to_batch = _add_delta_to_batch(options);
 
         // cache the points here for a batch upload
-        let batch_of_points = [];
+        // key = signalk path, value = value
+        // this batch has the last value registered during an interval and
+        // that's what will be published to timestream
+        let batch_of_points = {};
 
         // periodically publish the batched metrics to timestream
         _publish_interval = setInterval(function() {
             // publish
             _publish_to_timstream(batch_of_points);
             // reset the batch of points
-            batch_of_points = [];
+            batch_of_points = {};
         }, options.write_interval * 1000);
 
         // add a delta to the batch
         return function(delta) {
-            return add_to_batch(delta, batch_of_points);
+            batch_of_points = add_to_batch(delta, batch_of_points);
         };
     };
 
@@ -177,6 +192,16 @@ module.exports = function(app) {
 
         // observe all the deltas
         app.signalk.on('delta', _create_handle_delta(options));
+
+        // Note that I'm not using subscriptionmanager.  This is for two reasons:
+        //
+        // 1. It would only handle include lists; it can't do exclude lists.
+        //
+        // 2. The callback is invoked once per-metric and I want to make batch
+        // calls to timestream, so I'd have to batch across an unknown number
+        // of callback invocations.  It's simpler to keep track of this myself.
+        // This is the main reason and if this changes in future, I'd switch to
+        // subscriptionmanager.
     };
 
     let _stop = function(options) {
