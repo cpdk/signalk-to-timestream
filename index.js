@@ -189,9 +189,10 @@ module.exports = function(app) {
         debug('starting');
         _database_name = options.database;
         _table_name = options.table;
+        _handle_delta = _create_handle_delta(options);
 
         // observe all the deltas
-        app.signalk.on('delta', _create_handle_delta(options));
+        app.signalk.on('delta', _handle_delta);
 
         // Note that I'm not using subscriptionmanager.  This is for two reasons:
         //
@@ -206,8 +207,21 @@ module.exports = function(app) {
 
     let _stop = function(options) {
         debug('stopping');
-        // TODO: publish last batch
-        clearInterval(_publish_interval);
+
+        // stop the work
+        if (_handle_delta) {
+            app.signalk.removeListener('delta', _handle_delta);
+        }
+        if (_publish_interval) {
+            // TODO: publish last batch
+            clearInterval(_publish_interval);
+        }
+
+        // clean up the state
+        _database_name = undefined;
+        _table_name = undefined;
+        _handle_delta = undefined;
+        _publish_interval = undefined;
     };
 
     return {
