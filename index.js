@@ -118,7 +118,7 @@ module.exports = function(app) {
 
         return function(delta, batch_of_points) {
             // filter out deltas not about us
-            if (delta.context !== 'vessels.self' && delta.context === app.selfId) {
+            if (delta.context !== 'vessels.self' && delta.context !== app.selfId) {
                 return;
             }
 
