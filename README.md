@@ -12,7 +12,7 @@ Plugin](https://grafana.com/grafana/plugins/grafana-timestream-datasource).
 This plugin assumes you have a Timestream database and table pre-created.  If
 you're running in AWS you can use a role.  Otherwise you'll need to create a
 user with an access key and secret key.  The role/user needs permission to
-timestream:DescribeEndpoints and timestream:WriteRecords, but that's it.
+`timestream:DescribeEndpoints` and `timestream:WriteRecords`, but that's it.
 
 Note that if you're using an AWS config file, since this runs in node.js,
 you'll need to set the environment variable `AWS_SDK_CONFIG_FILE`.
