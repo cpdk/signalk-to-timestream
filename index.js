@@ -17,6 +17,7 @@ const debug = require('debug')('signalk-to-timestream');
 const trace = require('debug')('signalk-to-timestream:trace');
 const aws = require('aws-sdk');
 const timestream = new aws.TimestreamWrite({ apiVersion: '2018-11-01' });
+const _ = require('lodash');
 
 module.exports = function(app) {
     let _database_name;
@@ -34,17 +35,57 @@ module.exports = function(app) {
         } else if (typeof(value) == 'bool') {
             return "BOOLEAN";
         } else {
-            debug(`could not determine type for ${point.name}=${value}`);
+            debug(`could not determine type for ${point.name}=${JSON.stringify(value)}`);
             return "VARCHAR";
         }
     };
 
     // publish the batch to timestream
     let _publish_to_timstream = function(batch_of_points) {
+        if (!batch_of_points) {
+            trace('nothing to publish');
+            return;
+        }
+
+        let batch;
         // at this point we only care about the values in the batch_of_points,
         // as the keys were just used to ensure we got the latest reported
         // delta for each path
-        let records = Object.values(batch_of_points).map(function(point) {
+        batch = Object.values(batch_of_points);
+        // filter out stuff without the proper values
+        batch = batch.filter(function(point) {
+            return !_.isUndefined(point) &&
+                    !_.isUndefined(point.name) &&
+                    !_.isUndefined(point.value) &&
+                    !_.isUndefined(point.timestamp);
+        });
+        // some values are composite values, like navigation or current
+        // in those cases, create a list element for each key/value pair in
+        // the nested object
+        //
+        // ex: {"name":"environment.current","value":{"setTrue":2.4364,"drift":0.34}}
+        //  -> [{"name":"environment.current.setTrue","value":2.4364,},
+        //      {"name":"environment.current.drift","value":0.34}]
+        batch = batch.map(function(point) {
+            if (typeof(point.value) == 'object') {
+                return Object.entries(point.value).map(function(v) {
+                    const value_name = v[0];
+                    const value = v[1];
+
+                    return {
+                        name: `${point.name}.${value_name}`,
+                        value: value,
+                        timestamp: point.timestamp
+                    };
+                });
+            } else {
+                return point;
+            }
+        });
+        // convert the list that may have pairs into a flat list
+        batch = _.flatten(batch);
+
+        const records = batch.map(function(point) {
             return {
                 MeasureName: point.name,
                 MeasureValue: `${point.value}`,
@@ -78,7 +119,7 @@ module.exports = function(app) {
                 }
             });
         } else {
-            debug('nothing to publish');
+            trace('nothing to publish');
         }
     };
 

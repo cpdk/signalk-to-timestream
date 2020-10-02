@@ -12,6 +12,7 @@
   "license": "Apache-2.0",
   "dependencies": {
     "debug": "^2.2.0",
+    "lodash": "^4.17.4",
     "aws-sdk": "^2.764.0"
   }
 }
