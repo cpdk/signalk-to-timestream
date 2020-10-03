@@ -33,3 +33,17 @@ consists of the following parameters
 - __Filter List__: this controls what signalk paths are published, the list
   either contains glob patterns describing the paths that should be included or
   excluded from publishing, for example, you might publish `"environment.*"`.
+
+# Historical Data
+
+At the moment, this plugin does not deal with historical data.  There are two
+reasons for this.
+
+1. I just haven't done it yet.
+
+2. Timestream has a limited ingest window.  Timestream will only write to its
+   memory store and once data has aged out of the memory store, the time period
+   is frozen and writes will be rejected.  In practice, I assume most people
+   will set the memory store to <= 24 hours (I have).  This means that history
+   will be valuable for back filling during a connectivity gap, but will
+   probably be unusable for back filling an entire trip.
