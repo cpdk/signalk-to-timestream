@@ -158,13 +158,14 @@ module.exports = function(app) {
         let filter_function = _construct_filter_function(options);
 
         return function(delta, batch_of_points) {
+            // for the guardians, return the batch unmodified
             // filter out deltas not about us
             if (delta.context !== 'vessels.self' && delta.context !== app.selfId) {
-                return;
+                return batch_of_points;
             }
 
             if (!delta.updates) {
-                return;
+                return batch_of_points;
             }
 
             // We do this at two layers, since we have to layers to iterate
@@ -175,7 +176,7 @@ module.exports = function(app) {
             // single key.  The result is the new map.
             return delta.updates.reduce(function(batch, update) {
                 if (!update.values) {
-                    return;
+                    return batch;
                 }
 
                 let points = [];
