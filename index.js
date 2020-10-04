@@ -115,7 +115,7 @@ module.exports = function(app) {
                 if (err) {
                     debug(err);
                 } else {
-                    trace(`publish ok: ${JSON.stringify(data)}`);
+                    trace(`publish ok: num records=${records.length} response=${JSON.stringify(data)}`);
                 }
             });
         } else {
