@@ -1,6 +1,6 @@
 {
   "name": "signalk-to-timestream",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Signal K server plugin to send all numeric values & positions to Amazon Timestream",
   "main": "index.js",
   "repository": "https://github.com/c33howard/signalk-to-timestream.git",
