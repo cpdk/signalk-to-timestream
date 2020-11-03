@@ -16,14 +16,18 @@
 const debug = require('debug')('signalk-to-timestream');
 const trace = require('debug')('signalk-to-timestream:trace');
 const aws = require('aws-sdk');
-const timestream = new aws.TimestreamWrite({ apiVersion: '2018-11-01' });
+const timestream_query = new aws.TimestreamQuery({ apiVersion: '2018-11-01' });
+const timestream_write = new aws.TimestreamWrite({ apiVersion: '2018-11-01' });
 const _ = require('lodash');
+
+const parse_timestream = require('./parse_timestream');
 
 module.exports = function(app) {
     let _database_name;
     let _table_name;
     let _handle_delta;
     let _publish_interval;
+    let _streamers = {};
 
     let _value_to_type = function(point) {
         const value = point.value;
@@ -111,7 +115,7 @@ module.exports = function(app) {
 
         if (records.length > 0) {
             trace(`publishing ${JSON.stringify(params)}`);
-            timestream.writeRecords(params, function(err, data) {
+            timestream_write.writeRecords(params, function(err, data) {
                 if (err) {
                     debug(err);
                 } else {
@@ -236,6 +240,8 @@ module.exports = function(app) {
         // observe all the deltas
         app.signalk.on('delta', _handle_delta);
 
+        app.registerHistoryProvider(_plugin);
+
         // Note that I'm not using subscriptionmanager.  This is for two reasons:
         //
         // 1. It would only handle include lists; it can't do exclude lists.
@@ -259,6 +265,8 @@ module.exports = function(app) {
             clearInterval(_publish_interval);
         }
 
+        app.unregisterHistoryProvider(_plugin);
+
         // clean up the state
         _database_name = undefined;
         _table_name = undefined;
@@ -266,7 +274,102 @@ module.exports = function(app) {
         _publish_interval = undefined;
     };
 
-    return {
+    let _query = function(start_time, end_time) {
+        trace(`_query(${start_time}, ${end_time})`);
+
+        return new Promise((resolve, reject) => {
+            const q_start = `from_iso8601_timestamp('${start_time.toISOString()}')`;
+            const q_end   = `from_iso8601_timestamp('${end_time.toISOString()}')`;
+
+            const select    = `SELECT *`;
+            const from      = `FROM "${_database_name}"."${_table_name}"`;
+            const where     = `WHERE time >= ${q_start} AND time < ${q_end} AND context = '${app.selfId}'`;
+            const order_by  = `ORDER BY time ASC`;
+            const query     = `${select} ${from} ${where} ${order_by}`;
+
+            trace(`_query.query = ${query}`);
+
+            const params = {
+                QueryString: query
+            };
+
+            timestream_query.query(params, function(err, data) {
+                if (err) {
+                    reject(err);
+                } else {
+                    const delta = parse_timestream(app.selfId, data);
+                    trace(`timestream_query delta ${JSON.stringify(delta)}`);
+                    resolve([delta]);
+                }
+            });
+        });
+    };
+
+    let _stream_history = function(cookie, options, on_delta) {
+        const playback_rate = options.playbackRate || 1;
+        let playback_now = options.startTime;
+
+        debug(`start streaming cookie=${cookie} from ${playback_now} at rate ${playback_rate}`);
+
+        _streamers[cookie] = setInterval(function() {
+            const playback_interval_end = new Date(playback_now.getTime() + (1000 * playback_rate));
+            trace(`update stream from ${playback_now} to ${playback_interval_end}`);
+
+            _query(playback_now, playback_interval_end)
+                .then(on_delta)
+                .catch(err => {
+                    // log the error and continue
+                    debug(err);
+                });
+
+            playback_now = playback_interval_end;
+        }, 1000);
+
+        return function() {
+            debug(`stop streaming cookie=${cookie}`);
+            clearInterval(_streamers[cookie]);
+            delete _streamers[cookie];
+        };
+    };
+
+    let _get_history = function(time, path, callback) {
+        trace(`_get_history(${time}, ${path})`);
+
+        // look back through 5min of history, and assume that if we don't find
+        // a datapoint in that range, then it doesn't exist
+        const start_time = new Date(time.getTime() - 1000 * 60 * 5);
+        _query(start_time, time)
+            .then(callback)
+            .catch(err => {
+                // log the error and continue
+                debug(err);
+            });
+    };
+
+    let _has_any_data = function(options, callback) {
+        trace(`_has_any_data(${options.startTime})`);
+
+        // query from start time to 10s after start time and see if we have any deltas
+        const start_time = options.startTime;
+        const end_time = new Date(options.startTime.getTime() + (1000 * 10));
+
+        _query(start_time, end_time)
+            .then(deltas => {
+                // count the updates
+                const update_count = deltas.map(delta => delta.updates.length);
+                const total_updates = update_count.reduce((accumulator, cur_val) => accumulator + cur_val);
+
+                // we have data if there's at least one update
+                const has_data = total_updates > 0;
+                callback(has_data);
+            })
+            .catch(err => {
+                debug(err);
+                callback(false);
+            });
+    };
+
+    const _plugin = {
         id: 'signalk-to-timestream',
         name: 'Amazon Timestream publisher',
         description: 'SignalK server plugin that publishes data to Amazon Timestream',
@@ -309,6 +412,11 @@ module.exports = function(app) {
         },
 
         start: _start,
-        stop: _stop
+        stop: _stop,
+        getHistory: _get_history,
+        streamHistory: _stream_history,
+        hasAnyData: _has_any_data,
     };
+
+    return _plugin;
 };
