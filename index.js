@@ -13,8 +13,8 @@
  * limitations under the License.
  */
 
-const debug = require('debug')('signalk-to-timestream');
-const trace = require('debug')('signalk-to-timestream:trace');
+let debug = require('debug')('signalk-to-timestream');
+let trace = require('debug')('signalk-to-timestream:trace');
 const aws = require('aws-sdk');
 const timestream_query = new aws.TimestreamQuery({ apiVersion: '2018-11-01' });
 const timestream_write = new aws.TimestreamWrite({ apiVersion: '2018-11-01' });
@@ -46,6 +46,9 @@ module.exports = function(app) {
 
     // publish the batch to timestream
     let _publish_to_timstream = function(batch_of_points) {
+        debug = require('debug')('signalk-to-timestream');
+        trace = require('debug')('signalk-to-timestream:trace');
+
         if (!batch_of_points) {
             trace('nothing to publish');
             return;
