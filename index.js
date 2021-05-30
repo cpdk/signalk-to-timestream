@@ -97,6 +97,10 @@ module.exports = function(app) {
                 Time: `${point.timestamp}`
             };
         });
+
+        // filter out NaN double values as they cause Timestream to reject the batch
+        records = records.filter((r) => (r.MeasureValueType != 'DOUBLE' || !Number.isNaN(Number(r.MeasureValue))));
+
         // TODO: this assumes self only
         let common_attributes = {
             TimeUnit: "MILLISECONDS",
