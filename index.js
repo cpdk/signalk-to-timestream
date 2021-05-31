@@ -89,43 +89,50 @@ module.exports = function(app) {
         // convert the list that may have pairs into a flat list
         batch = _.flatten(batch);
 
-        const records = batch.map(function(point) {
-            return {
-                MeasureName: point.name,
-                MeasureValue: `${point.value}`,
-                MeasureValueType: _value_to_type(point),
-                Time: `${point.timestamp}`
+        // split batch into max size accepted by timestream
+        const recordBatches = [];
+        if (records.length > 100) {
+          recordBatches.push(... _array_chunks(records, 100));
+
+        } else {
+           recordBatches.push(records);
+        }
+
+        for (const rec of recordBatches) {
+            let params = {
+                DatabaseName: _database_name,
+                TableName: _table_name,
+                Records: rec,
+                CommonAttributes: common_attributes
             };
-        });
-        // TODO: this assumes self only
-        let common_attributes = {
-            TimeUnit: "MILLISECONDS",
-            Dimensions: [{
-                Name: "context",
-                Value: app.selfId
-            }]
-        };
 
-        let params = {
-            DatabaseName: _database_name,
-            TableName: _table_name,
-            Records: records,
-            CommonAttributes: common_attributes
-        };
-
-        if (records.length > 0) {
-            trace(`publishing ${JSON.stringify(params)}`);
-            timestream_write.writeRecords(params, function(err, data) {
+            if (records.length > 0) {
+              debug(`publishing ${records.length} records`);
+              trace(`publishing ${JSON.stringify(params)}`);
+              timestream_write.writeRecords(params, function(err, data) {
                 if (err) {
                     debug(err);
                 } else {
                     trace(`publish ok: num records=${records.length} response=${JSON.stringify(data)}`);
                 }
             });
-        } else {
-            trace('nothing to publish');
-        }
+          } else {
+              trace('nothing to publish');
+          }
+       }
+
     };
+
+    /*
+    * Split array into multiple arrays of max size chunk_size and return array of chunks
+    */
+    let _array_chunks = function(array, chunk_size) {
+        return Array(Math.ceil(array.length / chunk_size))
+            .fill()
+            .map((_, index) => index * chunk_size)
+            .map(begin => array.slice(begin, begin + chunk_size));
+    };
+
 
     let _construct_filter_function = function(options) {
         const regexes = options.filter_list.map(function(path) {
